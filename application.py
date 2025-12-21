@@ -69,9 +69,9 @@ async def health_check():
     }
 
 
-@app.get("/emails", response_model=list[Mail])
-async def get_emails(max_emails: int = 10):
-    """Get emails from the configured IMAP server (GET method).
+@app.get("/full-emails", response_model=list[Mail])
+async def get_full_emails(max_emails: int = 10) -> list[Mail]:
+    """Get full emails from the configured IMAP server (GET method).
 
     Args:
         max_emails: Maximum number of emails to fetch (default: 10)
@@ -83,7 +83,26 @@ async def get_emails(max_emails: int = 10):
         raise HTTPException(status_code=503, detail="Mail fetcher not initialized")
 
     try:
-        return mail_fetcher.fetch_emails(max_emails=max_emails)
+        return mail_fetcher.fetch_full_emails(max_emails=max_emails)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")
+
+
+@app.get("/basic-emails", response_model=list[Mail])
+async def get_basic_emails(max_emails: int = 10) -> list[Mail]:
+    """Get basic emails from the configured IMAP server (GET method).
+
+    Args:
+        max_emails: Maximum number of emails to fetch (default: 10)
+
+    Returns:
+        List of fetched emails with their metadata and content
+    """
+    if not mail_fetcher:
+        raise HTTPException(status_code=503, detail="Mail fetcher not initialized")
+
+    try:
+        return mail_fetcher.fetch_basic_emails(max_emails=max_emails)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")
 
