@@ -270,14 +270,28 @@ class MailFetcher:
 
     def _convert_str_date_to_datetime(self, date_str: str) -> datetime:
         """Convert email date string to datetime object."""
+        patterns = [
+            "%a, %d %b %Y %H:%M:%S %z",
+            "%d %b %Y %H:%M:%S %z",
+            "%a, %d %b %Y %H:%M:%S %Z",
+        ]
+        for pattern in patterns:
+            dt = self._convert_str_date_to_datetime_pattern(date_str, pattern)
+            if dt:
+                return dt
+        raise ValueError(f"Unrecognized date format: {date_str}")
+
+    def _convert_str_date_to_datetime_pattern(
+        self, date_str: str, pattern: str
+    ) -> datetime | None:
+        """Convert email date string to datetime object using given pattern."""
+        # Strip everything after and including ' ('
+        if " (" in date_str:
+            date_str = date_str.split(" (")[0]
         try:
-            return datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %z (%Z)")
+            return datetime.strptime(date_str, pattern)
         except ValueError as e:
-            try:
-                return datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %z")
-            except ValueError:
-                logger.error(f"Failed to parse date: {date_str} Error: {str(e)}")
-                raise
+            return None
 
     def _decode_bytes_to_str(self, byte_str: bytes) -> str:
         """Decode bytes to string, handling different encodings."""
