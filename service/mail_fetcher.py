@@ -38,7 +38,7 @@ class Mail(BaseModel):
     date: datetime
     subject: str
     sender: str
-    recipients: list[str]
+    recipients: list[str] = []
     body: str | None = None
     attachments: list[Attachment] = []
 
@@ -86,7 +86,7 @@ class MailFetcher:
         (BODYSTRUCTURE) - Structure without content (useful to see attachments without downloading)
         (BODY[TEXT]) - Only body content, no headers
         """
-        date = self.get_date_days_ago(days_ago)
+        date = self._get_date_days_ago(days_ago)
         status, messages = self.mail.search(None, f"SINCE {date}")
         email_ids = messages[0].split()
 
@@ -147,7 +147,7 @@ class MailFetcher:
         SENTBEFORE dd-mmm-yyyy - Sent before date
         SENTSINCE dd-mmm-yyyy - Sent since date
         """
-        date = self.get_date_days_ago(days_ago)
+        date = self._get_date_days_ago(days_ago)
         status, messages = self.mail.search(None, f"SINCE {date}")
         email_ids = messages[0].split()
 
@@ -159,7 +159,7 @@ class MailFetcher:
                 mails.append(mail)
         return mails
 
-    def get_date_days_ago(self, days: int) -> str:
+    def _get_date_days_ago(self, days: int) -> str:
         """Get date string for 'days' ago in format dd-MMM-YYYY."""
         return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime(
             "%d-%b-%Y"
@@ -234,7 +234,7 @@ class MailFetcher:
         # Get subject
         subject = decode_header(msg["Subject"])[0][0]
         if isinstance(subject, bytes):
-            subject = subject.decode()
+            subject = self._decode_bytes_to_str(subject)
 
         # Get sender
         from_ = msg.get("From")
@@ -245,7 +245,7 @@ class MailFetcher:
 
         return Mail(
             id=mail_id,
-            date=datetime.strptime(date_, "%a, %d %b %Y %H:%M:%S %z"),
+            date=self._convert_str_date_to_datetime(date_),
             subject=subject,
             sender=from_,
             recipients=to_.split(", "),
@@ -267,3 +267,21 @@ class MailFetcher:
                 data=attachment_data,
             )
         return None
+
+    def _convert_str_date_to_datetime(self, date_str: str) -> datetime:
+        """Convert email date string to datetime object."""
+        try:
+            return datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %z (%Z)")
+        except ValueError as e:
+            try:
+                return datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %z")
+            except ValueError:
+                logger.error(f"Failed to parse date: {date_str} Error: {str(e)}")
+                raise
+
+    def _decode_bytes_to_str(self, byte_str: bytes) -> str:
+        """Decode bytes to string, handling different encodings."""
+        try:
+            return byte_str.decode("utf-8")
+        except UnicodeDecodeError:
+            return byte_str.decode("latin-1")

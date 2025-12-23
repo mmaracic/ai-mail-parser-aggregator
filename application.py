@@ -2,6 +2,7 @@
 
 import logging
 import os
+import traceback
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -85,6 +86,7 @@ async def get_full_emails(max_emails: int = 10) -> list[Mail]:
     try:
         return mail_fetcher.fetch_full_emails(max_emails=max_emails)
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")
 
 
@@ -104,6 +106,7 @@ async def get_basic_emails(max_emails: int = 10) -> list[Mail]:
     try:
         return mail_fetcher.fetch_basic_emails(max_emails=max_emails)
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")
 
 
