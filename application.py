@@ -8,7 +8,12 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 
-from service.mail_fetcher import Attachment, Mail, MailFetcher, MailFetcherConfiguration
+from service.mail.mail_fetcher import (
+    Attachment,
+    Mail,
+    MailFetcher,
+    MailFetcherConfiguration,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -70,21 +75,20 @@ async def health_check():
     }
 
 
-@app.get("/full-emails", response_model=list[Mail])
-async def get_full_emails(max_emails: int = 10) -> list[Mail]:
-    """Get full emails from the configured IMAP server (GET method).
+@app.get("/full-email", response_model=Mail | None)
+async def get_full_email(email_id: str) -> Mail | None:
+    """Get full email from the configured IMAP server by email ID (GET method).
 
     Args:
-        max_emails: Maximum number of emails to fetch (default: 10)
-
+        email_id: ID of the email to fetch
     Returns:
-        List of fetched emails with their metadata and content
+        The fetched email with its metadata and content
     """
     if not mail_fetcher:
         raise HTTPException(status_code=503, detail="Mail fetcher not initialized")
 
     try:
-        return mail_fetcher.fetch_full_emails(max_emails=max_emails)
+        return mail_fetcher.fetch_full_email_by_id(email_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")

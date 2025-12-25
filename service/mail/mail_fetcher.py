@@ -3,7 +3,7 @@
 import email
 import imaplib
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.header import decode_header
 from email.message import EmailMessage
 
@@ -41,6 +41,10 @@ class Mail(BaseModel):
     recipients: list[str] = []
     body: str | None = None
     attachments: list[Attachment] = []
+
+    def get_identifier(self) -> str:
+        """Return a unique identifier for the email."""
+        return f"{self.date.year}-{self.date.month}-{self.date.day}-{self.id}"
 
 
 class MailFetcher:
@@ -91,7 +95,8 @@ class MailFetcher:
         email_ids = messages[0].split()
 
         mails = []
-        for email_id in email_ids[-max_emails:]:  # Get last N emails
+        ids_to_process = email_ids[-max_emails:] if max_emails > 0 else email_ids
+        for email_id in ids_to_process:
             # Fetch only headers we need
             mail = self._extract_basic_email(email_id)
             if mail:
@@ -153,17 +158,20 @@ class MailFetcher:
 
         # Fetch and process emails
         mails = []
-        for email_id in email_ids[-max_emails:]:  # Get last N emails
+        ids_to_process = email_ids[-max_emails:] if max_emails > 0 else email_ids
+        for email_id in ids_to_process:
             mail = self._extract_full_email(email_id)
             if mail:
                 mails.append(mail)
         return mails
 
+    def fetch_full_email_by_id(self, email_id: str) -> Mail | None:
+        """Fetch a single email by its ID."""
+        return self._extract_full_email(email_id)
+
     def _get_date_days_ago(self, days: int) -> str:
         """Get date string for 'days' ago in format dd-MMM-YYYY."""
-        return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime(
-            "%d-%b-%Y"
-        )
+        return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%d-%b-%Y")
 
     # Can be used to decode headers like subject or filenames
     def _decode_header(self, header) -> str:
@@ -198,7 +206,7 @@ class MailFetcher:
             if isinstance(response, tuple):
                 msg: EmailMessage[str, str] = email.message_from_bytes(response[1])
 
-                mail = self._get_basic_email_info(email_id.decode(), msg)
+                mail = self._get_basic_email_info(email_id, msg)
                 # Get body
                 body = ""
                 attachments = []
