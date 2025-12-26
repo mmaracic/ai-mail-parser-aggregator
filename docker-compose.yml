@@ -1,0 +1,37 @@
+services:
+  memgraph:
+    image: memgraph/memgraph-mage:3.7.1
+    container_name: memgraph-mage
+    pull_policy: always
+    ports:
+      - "7687:7687"
+      - "7444:7444"
+    # Use a named Docker volume instead of a host bind mount to avoid
+    # filesystem incompatibilities (common on /mnt/ mounts or Windows filesystems).
+    volumes:
+      - memgraph-data:/var/lib/memgraph
+      - ./memgraph-init.cypher:/etc/memgraph/init.cypher
+    command: 
+      - "--log-level=TRACE"
+      - "--bolt-cert-file=/etc/memgraph/ssl/cert.pem"
+      - "--bolt-key-file=/etc/memgraph/ssl/key.pem"
+      - "--auth-password-permit-null=false"
+      - "--init-file=/etc/memgraph/init.cypher"
+
+  lab:
+    image: memgraph/lab:3.6.2
+    container_name: memgraph-lab
+    pull_policy: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - memgraph
+    environment:
+      - QUICK_CONNECT_MG_HOST=memgraph
+      - QUICK_CONNECT_MG_PORT=7687
+      - PORT=3000
+      - SSL_IS_ENABLED=true
+      - QUICK_CONNECT_IS_DISABLED=true
+
+volumes:
+  memgraph-data: {}
