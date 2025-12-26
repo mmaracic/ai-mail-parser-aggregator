@@ -5,6 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "azure-cosmos>=4.14.3",
+    "azure-storage-blob>=12.27.1",
     "beautifulsoup4>=4.14.3",
     "fastapi>=0.127.0",
     "pydantic>=2.12.5",

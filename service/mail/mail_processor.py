@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, field_serializer
 
+from service.database.azure_nosql_repo import AzureRepository
+from service.file.azure_blob_repo import AzureBlobRepository, RepoBlob
 from service.mail.mail_fetcher import Mail, MailFetcher
 
 
@@ -27,12 +29,57 @@ class ProcessedMail(BaseModel):
         return self.mail.get_identifier()
 
 
+class ProcessingMailAudit(BaseModel):
+    """Represents an audit record for email processing."""
+
+    mail_identifier: str
+    mail_body_size: int
+    processing_start_time: datetime
+    processing_end_time: datetime
+    processing_duration_seconds: float
+    tokens_used: int
+
+    @field_serializer("processing_start_time", "processing_end_time")
+    def serialise_date(self, value: datetime) -> str:
+        """Serialize datetime to ISO 8601 format."""
+        return value.isoformat()
+
+
+class ProcessingAudit(BaseModel):
+    """Represents an audit record for email processing."""
+
+    total_emails_fetched: int
+    total_emails_processed: int
+    mail_start_window: datetime
+    mail_end_window: datetime
+    processing_start_time: datetime
+    processing_end_time: datetime
+
+    @field_serializer(
+        "processing_start_time",
+        "processing_end_time",
+        "mail_start_window",
+        "mail_end_window",
+    )
+    def serialise_date(self, value: datetime) -> str:
+        """Serialize datetime to ISO 8601 format."""
+        return value.isoformat()
+
+
 class MailProcessor:
     """Process emails fetched by MailFetcher."""
 
-    def __init__(self, fetcher: MailFetcher, approved_mails: list[str]) -> None:
+    def __init__(
+        self,
+        fetcher: MailFetcher,
+        audit_repo: AzureRepository,
+        blob_repo: AzureBlobRepository,
+        approved_mails: list[str],
+    ) -> None:
         """Initialize MailProcessor with a MailFetcher and approved email list."""
         self.fetcher = fetcher
+        self.audit_repo = audit_repo
+        self.blob_repo = blob_repo
         self.approved_mails = approved_mails
 
     def process_emails(self, days: int = 7) -> int:
@@ -51,6 +98,7 @@ class MailProcessor:
         return processed_mails
 
     def process_email(self, email: Mail) -> bool:
+        """Process a single email."""
         # Clean HTML with BeautifulSoup
         soup = BeautifulSoup(email.body, "html.parser")
 
@@ -68,7 +116,7 @@ class MailProcessor:
 
         return True
 
-    def _extract_email_from_sender(self, sender) -> str | None:
+    def _extract_email_from_sender(self, sender: str) -> str | None:
         """Extract relevant data from the sender's email address."""
         # Match email in angle brackets: Name <email@domain.com>
         match = re.search(r"<([^>]+)>", sender)
