@@ -75,7 +75,7 @@ class AzureBlobRepository:
             for blob in blobs
         ]
 
-    def upload_blob(self, blob: RepoBlob) -> None:
+    def upload_blob(self, blob: RepoBlob, overwrite: bool = True) -> None:
         """Upload a blob to the specified container.
 
         Args:
@@ -83,7 +83,11 @@ class AzureBlobRepository:
 
         """
         container_client = self.blob_service_client.get_container_client(blob.container)
-        container_client.upload_blob(name=blob.name, data=blob.data)
+        if not container_client.exists():
+            self.create_container(blob.container)
+        container_client.upload_blob(
+            name=blob.name, data=blob.data, overwrite=overwrite
+        )
 
     def download_blob(self, blob: RepoBlob) -> RepoBlob:
         """Download a blob from the specified container.

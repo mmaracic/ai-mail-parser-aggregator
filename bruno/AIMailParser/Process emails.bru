@@ -1,0 +1,20 @@
+meta {
+  name: Process emails
+  type: http
+  seq: 4
+}
+
+get {
+  url: http://localhost:8000/process-emails?days=1
+  body: none
+  auth: inherit
+}
+
+params:query {
+  days: 1
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
