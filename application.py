@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
             port=int(os.getenv("MEMGRAPH_PORT", "7687")),
             username=os.getenv("MEMGRAPH_USERNAME", "admin"),
             password=os.getenv("MEMGRAPH_PASSWORD", "admin_password"),
-            encrypted=os.getenv("MEMGRAPH_ENCRYPTED", "True").lower() == "True",
+            encrypted=os.getenv("MEMGRAPH_ENCRYPTED", "True").lower() == "true",
         )
 
         mail_processor = MailProcessor(
