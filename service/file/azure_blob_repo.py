@@ -1,5 +1,6 @@
 """Azure Blob Storage repository implementation."""
 
+from azure.core.exceptions import ResourceExistsError
 from azure.storage.blob import BlobServiceClient
 from pydantic import BaseModel
 
@@ -75,19 +76,32 @@ class AzureBlobRepository:
             for blob in blobs
         ]
 
-    def upload_blob(self, blob: RepoBlob, overwrite: bool = True) -> None:
+    def upload_blob(self, blob: RepoBlob, overwrite: bool = True) -> bool:
         """Upload a blob to the specified container.
 
         Args:
             blob (RepoBlob): The blob to upload.
+            overwrite (bool): Whether to overwrite the blob if it already exists.
 
         """
         container_client = self.blob_service_client.get_container_client(blob.container)
         if not container_client.exists():
             self.create_container(blob.container)
-        container_client.upload_blob(
-            name=blob.name, data=blob.data, overwrite=overwrite
-        )
+        try:
+            container_client.upload_blob(
+                name=blob.name,
+                data=blob.data,
+                overwrite=False,
+            )
+        except ResourceExistsError:
+            if overwrite:
+                container_client.upload_blob(
+                    name=blob.name,
+                    data=blob.data,
+                    overwrite=True,
+                )
+                return True
+        return False
 
     def download_blob(self, blob: RepoBlob) -> RepoBlob:
         """Download a blob from the specified container.

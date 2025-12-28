@@ -17,6 +17,8 @@ from service.mail.mail_fetcher import (
     MailFetcherConfiguration,
 )
 from service.mail.mail_processor import MailProcessor
+from service.text import NewsletterCleaner
+from service.text.text_processor import HtmlProcessor, TextProcessorWrapper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,7 +30,6 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle."""
-    global mail_fetcher
 
     # Startup: Initialize mail fetcher
     try:
@@ -71,9 +72,12 @@ async def lifespan(app: FastAPI):
             blob_repo=blob_repo,
             blob_container=blob_container,
             approved_mails=approved_mails,
+            text_processor_wrapper=TextProcessorWrapper(
+                [HtmlProcessor(), NewsletterCleaner()]
+            ),
         )
         app.state.mail_processor = mail_processor
-        logger.info(f"✓ Connected to {config.imap_server} as {config.username}")
+        logger.info(f"✓ Connected to {config.imap_server}")
     except Exception as e:
         logger.error(f"✗ Failed to initialize mail fetcher: {e}")
         raise
@@ -95,11 +99,13 @@ app = FastAPI(
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request) -> dict[str, str]:
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "mail_fetcher": "connected" if mail_fetcher else "disconnected",
+        "mail_fetcher": (
+            "connected" if request.app.state.mail_fetcher else "disconnected"
+        ),
     }
 
 
