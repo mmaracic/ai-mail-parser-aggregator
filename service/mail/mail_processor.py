@@ -7,7 +7,12 @@ from datetime import UTC, datetime
 from pydantic import BaseModel, field_serializer
 
 from service.database.azure_nosql_repo import AzureRepository
+from service.database.knowledge_database import KnowledgeDatabase
 from service.file.azure_blob_repo import AzureBlobRepository, RepoBlob
+from service.llm.knowledge_extraction_llm import (
+    KnowledgeExtractionLLM,
+    MeteredKnowledgeConceptResponse,
+)
 from service.mail.mail_fetcher import Mail, MailFetcher
 from service.text.text_processor import ProcessingAudit, TextProcessorWrapper
 from service.util import calculate_savings
@@ -18,6 +23,8 @@ class ProcessedMail(BaseModel):
 
     mail: Mail
     processed_at: datetime
+    tokens_used: int
+    tokens_cached: int
 
     @field_serializer("processed_at")
     def serialise_date(self, value: datetime) -> str:
@@ -41,6 +48,7 @@ class ProcessingMailAudit(BaseModel):
     processing_end_time: datetime
     processing_duration_seconds: float
     tokens_used: int = 0
+    tokens_cached: int = 0
     processing_steps: list[ProcessingAudit]
 
     @field_serializer("processing_start_time", "processing_end_time")
@@ -83,6 +91,8 @@ class MailProcessor:
         blob_container: str,
         approved_mails: list[str],
         text_processor_wrapper: TextProcessorWrapper,
+        knowledge_extraction_llm: KnowledgeExtractionLLM,
+        knowledge_database: KnowledgeDatabase,
     ) -> None:
         """Initialize MailProcessor with a MailFetcher and approved email list."""
         self.fetcher = fetcher
@@ -91,6 +101,8 @@ class MailProcessor:
         self.blob_container = blob_container
         self.approved_mails = approved_mails
         self.text_processor_wrapper = text_processor_wrapper
+        self.knowledge_extraction_llm = knowledge_extraction_llm
+        self.knowledge_database = knowledge_database
 
     def process_emails(self, days: int = 7) -> int:
         """Fetch and process emails from the last 'days' days."""
@@ -109,6 +121,7 @@ class MailProcessor:
             email = self.fetcher.fetch_full_email_by_id(basic_email.id)
             process_start = datetime.now(tz=UTC)
             body_size_before = len(email.body)
+
             processed_mail, processing_audits = self.process_email(email)
             process_end = datetime.now(tz=UTC)
 
@@ -118,7 +131,8 @@ class MailProcessor:
                 original_body_size=body_size_before,
                 processed_body_size=len(processed_mail.mail.body),
                 processing_body_savings_percentage=calculate_savings(
-                    body_size_before, len(processed_mail.mail.body)
+                    body_size_before,
+                    len(processed_mail.mail.body),
                 ),
                 processing_start_time=process_start,
                 processing_end_time=process_end,
@@ -126,6 +140,8 @@ class MailProcessor:
                     process_end - process_start
                 ).total_seconds(),
                 processing_steps=processing_audits,
+                tokens_used=processed_mail.tokens_used,
+                tokens_cached=processed_mail.tokens_cached,
             )
             process_audits.append(mail_audit_record)
             self.blob_repo.upload_blob(
@@ -156,6 +172,14 @@ class MailProcessor:
             source=self._extract_email_from_sender(email.sender),
         )
         email.body = cleaned_text
+        metered_response: MeteredKnowledgeConceptResponse = (
+            self.knowledge_extraction_llm.get_response(cleaned_text)
+        )
+        self.knowledge_database.add_knowledge(
+            concepts=metered_response.concepts,
+            email_id=email.get_identifier(),
+            source=self._extract_email_from_sender(email.sender),
+        )
 
         return (
             ProcessedMail(
@@ -163,6 +187,8 @@ class MailProcessor:
                 processed_at=datetime.now(tz=UTC),
                 original_body_size=len(email.body),
                 processed_body_size=len(cleaned_text),
+                tokens_used=metered_response.total_tokens,
+                tokens_cached=metered_response.cached_tokens,
             ),
             audits,
         )

@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 
 from service.database.azure_nosql_repo import AzureRepository
+from service.database.knowledge_database import KnowledgeDatabase
 from service.file.azure_blob_repo import AzureBlobRepository
+from service.llm.knowledge_extraction_llm import KnowledgeExtractionLLM
 from service.mail.mail_fetcher import (
     Attachment,
     Mail,
@@ -66,6 +68,20 @@ async def lifespan(app: FastAPI):
         logger.info(f"✓ Loaded {len(approved_mails)} approved mails from config repo")
         blob_repo = AzureBlobRepository(os.getenv("AZURE_BLOB_CONNECTION_STRING", ""))
         blob_container = os.getenv("BLOB_CONTAINER", "processed-emails")
+
+        knowledge_extraction_llm=KnowledgeExtractionLLM(
+            model=os.getenv("LLM_MODEL", "openrouter/nvidia/nemotron-3-nano-30b-a3b:free"),
+            api_key=os.getenv("LLM_API_KEY", ""),
+            prompt="Extract knowledge concepts from the following text.",
+        )
+        knowledge_database=KnowledgeDatabase(
+            host=os.getenv("MEMGRAPH_HOST", "localhost"),
+            port=int(os.getenv("MEMGRAPH_PORT", "7687")),
+            username=os.getenv("MEMGRAPH_USERNAME", "admin"),
+            password=os.getenv("MEMGRAPH_PASSWORD", "admin_password"),
+            encrypted=os.getenv("MEMGRAPH_ENCRYPTED", "True").lower() == "True",
+        )
+
         mail_processor = MailProcessor(
             fetcher=mail_fetcher,
             audit_repo=audit_repo,
@@ -75,6 +91,8 @@ async def lifespan(app: FastAPI):
             text_processor_wrapper=TextProcessorWrapper(
                 [HtmlProcessor(), NewsletterCleaner()]
             ),
+            knowledge_extraction_llm=knowledge_extraction_llm,
+            knowledge_database=knowledge_database,
         )
         app.state.mail_processor = mail_processor
         logger.info(f"✓ Connected to {config.imap_server}")
