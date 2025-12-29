@@ -35,19 +35,17 @@ class KnowledgeExtractionLLM:
         self,
         model: str,
         api_key: str,
-        prompt: str,
     ) -> None:
         """Initialize the LLM wrapper with API key and prompt."""
         self.model = model
         self.api_key = api_key
-        self.prompt = prompt
 
-    def get_response(self, query: str) -> MeteredKnowledgeConceptResponse:
+    def get_response(self, query: str, prompt: str) -> MeteredKnowledgeConceptResponse:
         """Get a response from the LLM for a given query."""
         response: ModelResponse = completion(
             model=self.model,
             messages=[
-                {"content": self.prompt, "role": "system"},
+                {"content": prompt, "role": "system"},
                 {"content": query, "role": "user"},
             ],
             stream=False,

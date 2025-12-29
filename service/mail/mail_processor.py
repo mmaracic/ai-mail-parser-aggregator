@@ -1,5 +1,6 @@
 """Module for processing emails."""
 
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -17,6 +18,8 @@ from service.mail.mail_fetcher import Mail, MailFetcher
 from service.text.text_processor import ProcessingAudit, TextProcessorWrapper
 from service.util import calculate_savings
 
+logger = logging.getLogger(__name__)
+
 
 class ProcessedMail(BaseModel):
     """Represents a processed email to be stored in the blob storage."""
@@ -25,6 +28,11 @@ class ProcessedMail(BaseModel):
     processed_at: datetime
     tokens_used: int
     tokens_cached: int
+    model: str
+    provider: str
+    concept_count: int
+    keyword_count: int
+    url_count: int
 
     @field_serializer("processed_at")
     def serialise_date(self, value: datetime) -> str:
@@ -49,6 +57,11 @@ class ProcessingMailAudit(BaseModel):
     processing_duration_seconds: float
     tokens_used: int = 0
     tokens_cached: int = 0
+    model: str
+    provider: str
+    concept_count: int
+    keyword_count: int
+    url_count: int
     processing_steps: list[ProcessingAudit]
 
     @field_serializer("processing_start_time", "processing_end_time")
@@ -87,9 +100,9 @@ class MailProcessor:
         self,
         fetcher: MailFetcher,
         audit_repo: AzureRepository,
+        config_repo: AzureRepository,
         blob_repo: AzureBlobRepository,
         blob_container: str,
-        approved_mails: list[str],
         text_processor_wrapper: TextProcessorWrapper,
         knowledge_extraction_llm: KnowledgeExtractionLLM,
         knowledge_database: KnowledgeDatabase,
@@ -97,20 +110,24 @@ class MailProcessor:
         """Initialize MailProcessor with a MailFetcher and approved email list."""
         self.fetcher = fetcher
         self.audit_repo = audit_repo
+        self.config_repo = config_repo
         self.blob_repo = blob_repo
         self.blob_container = blob_container
-        self.approved_mails = approved_mails
         self.text_processor_wrapper = text_processor_wrapper
         self.knowledge_extraction_llm = knowledge_extraction_llm
         self.knowledge_database = knowledge_database
 
     def process_emails(self, days: int = 7) -> int:
         """Fetch and process emails from the last 'days' days."""
+        approved_mails = self.config_repo.read_item("approved_mails").get("mails", [])
+        logger.info(f"✓ Loaded {len(approved_mails)} approved mails from config repo")
+        llm_prompt = self.config_repo.read_item("llm_prompt").get("prompt", "")
+        logger.info(f"✓ Loaded LLM prompt from config repo")
         emails = self.fetcher.fetch_basic_emails(days_ago=days, max_emails=0)
         mails_to_process: list[Mail] = [
             email
             for email in emails
-            if self._extract_email_from_sender(email.sender) in self.approved_mails
+            if self._extract_email_from_sender(email.sender) in approved_mails
         ]
         mail_timestamps = [email.date for email in mails_to_process]
         mail_start_window = min(mail_timestamps) if len(mail_timestamps) > 0 else None
@@ -122,7 +139,9 @@ class MailProcessor:
             process_start = datetime.now(tz=UTC)
             body_size_before = len(email.body)
 
-            processed_mail, processing_audits = self.process_email(email)
+            processed_mail, processing_audits = self.process_email(
+                email=email, llm_prompt=llm_prompt
+            )
             process_end = datetime.now(tz=UTC)
 
             mail_audit_record = ProcessingMailAudit(
@@ -142,6 +161,11 @@ class MailProcessor:
                 processing_steps=processing_audits,
                 tokens_used=processed_mail.tokens_used,
                 tokens_cached=processed_mail.tokens_cached,
+                model=processed_mail.model,
+                provider=processed_mail.provider,
+                concept_count=processed_mail.concept_count,
+                keyword_count=processed_mail.keyword_count,
+                url_count=processed_mail.url_count,
             )
             process_audits.append(mail_audit_record)
             self.blob_repo.upload_blob(
@@ -165,7 +189,9 @@ class MailProcessor:
         self.audit_repo.create_item(audit_record.model_dump())
         return len(mails_to_process)
 
-    def process_email(self, email: Mail) -> tuple[ProcessedMail, list[ProcessingAudit]]:
+    def process_email(
+        self, email: Mail, llm_prompt: str
+    ) -> tuple[ProcessedMail, list[ProcessingAudit]]:
         """Process a single email."""
         cleaned_text, audits = self.text_processor_wrapper.process(
             email.body,
@@ -173,7 +199,10 @@ class MailProcessor:
         )
         email.body = cleaned_text
         metered_response: MeteredKnowledgeConceptResponse = (
-            self.knowledge_extraction_llm.get_response(cleaned_text)
+            self.knowledge_extraction_llm.get_response(
+                query=cleaned_text,
+                prompt=llm_prompt,
+            )
         )
         self.knowledge_database.add_knowledge(
             concepts=metered_response.concepts,
@@ -189,6 +218,15 @@ class MailProcessor:
                 processed_body_size=len(cleaned_text),
                 tokens_used=metered_response.total_tokens,
                 tokens_cached=metered_response.cached_tokens,
+                model=metered_response.model,
+                provider=metered_response.provider,
+                concept_count=len(metered_response.concepts),
+                keyword_count=sum(
+                    len(concept.keywords) for concept in metered_response.concepts
+                ),
+                url_count=sum(
+                    len(concept.urls) for concept in metered_response.concepts
+                ),
             ),
             audits,
         )

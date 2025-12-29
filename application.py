@@ -64,30 +64,31 @@ async def lifespan(app: FastAPI):
             database_name=db_name,
             container_name=config_container,
         )
-        approved_mails = config_repo.read_item("approved_mails").get("mails", [])
-        logger.info(f"✓ Loaded {len(approved_mails)} approved mails from config repo")
         blob_repo = AzureBlobRepository(os.getenv("AZURE_BLOB_CONNECTION_STRING", ""))
         blob_container = os.getenv("BLOB_CONTAINER", "processed-emails")
 
-        knowledge_extraction_llm=KnowledgeExtractionLLM(
-            model=os.getenv("LLM_MODEL", "openrouter/nvidia/nemotron-3-nano-30b-a3b:free"),
+        knowledge_extraction_llm = KnowledgeExtractionLLM(
+            model=os.getenv(
+                "LLM_MODEL",
+                "openrouter/nvidia/nemotron-3-nano-30b-a3b:free",
+            ),
             api_key=os.getenv("LLM_API_KEY", ""),
-            prompt="Extract knowledge concepts from the following text.",
         )
-        knowledge_database=KnowledgeDatabase(
+        knowledge_database = KnowledgeDatabase(
             host=os.getenv("MEMGRAPH_HOST", "localhost"),
             port=int(os.getenv("MEMGRAPH_PORT", "7687")),
             username=os.getenv("MEMGRAPH_USERNAME", "admin"),
             password=os.getenv("MEMGRAPH_PASSWORD", "admin_password"),
             encrypted=os.getenv("MEMGRAPH_ENCRYPTED", "True").lower() == "true",
+            database=os.getenv("MEMGRAPH_DATABASE", "knowledge_db"),
         )
 
         mail_processor = MailProcessor(
             fetcher=mail_fetcher,
             audit_repo=audit_repo,
+            config_repo=config_repo,
             blob_repo=blob_repo,
             blob_container=blob_container,
-            approved_mails=approved_mails,
             text_processor_wrapper=TextProcessorWrapper(
                 [HtmlProcessor(), NewsletterCleaner()]
             ),

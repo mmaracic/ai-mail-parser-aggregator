@@ -1,8 +1,10 @@
 """Module for managing a knowledge database."""
 
+from datetime import UTC, datetime
 import logging
 
 from gqlalchemy import Memgraph, match, merge
+from gqlalchemy.query_builders.memgraph_query_builder import Operator
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -15,6 +17,7 @@ EMAIL_LABEL = "Email"
 SOURCE_LABEL = "Source"
 
 NAME_PROPERTY = "name"
+CREATED_AT_PROPERTY = "created_at"
 URL_PROPERTY = "url"
 
 REPRESENTS_RELATIONSHIP = "REPRESENTS"
@@ -22,6 +25,8 @@ DESCRIBES_RELATIONSHIP = "DESCRIBES"
 CONTAINS_RELATIONSHIP = "CONTAINS"
 HOSTS_RELATIONSHIP = "HOSTS"
 SENDS_RELATIONSHIP = "SENDS"
+
+CUSTOM_CQL_ON_CREATE = "ON CREATE"
 
 
 class KnowledgeConcept(BaseModel):
@@ -32,6 +37,11 @@ class KnowledgeConcept(BaseModel):
     - Delete all nodes: MATCH (n) DETACH DELETE n
     - Return all nodes (limited): MATCH (n) RETURN n LIMIT 200
     - Return all nodes with relationships (limited): MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 200
+    - Return all concepts within a time range:
+        MATCH (c:Concept)
+        WHERE datetime(c.created_at) >= datetime('2025-12-29T00:00:00Z')
+        AND datetime(c.created_at) <= datetime('2025-12-29T23:59:59Z')
+        RETURN c
     """
 
     name: str
@@ -49,9 +59,11 @@ class KnowledgeDatabase:
         username: str,
         password: str,
         encrypted: bool,
+        database: str,
     ) -> None:
         """Initialize the knowledge database."""
         logger.info("Connecting to knowledge database with encrypted=%s", encrypted)
+        self.database = database
         self.memgraph = Memgraph(
             host=host,
             port=port,
@@ -68,6 +80,38 @@ class KnowledgeDatabase:
             .execute()
         )
         logger.info("%s nodes in the knowledge database", result)
+        self.create_constraints_and_indexes()
+
+    def create_constraints_and_indexes(self) -> None:
+        """Create constraints and indexes for the knowledge database."""
+        logger.info("Creating constraints and indexes for the knowledge database")
+        # Create uniqueness constraints
+        self.memgraph.execute(
+            f"CREATE CONSTRAINT ON (c:{CONCEPT_LABEL}) ASSERT c.{NAME_PROPERTY} IS UNIQUE;"
+        )
+        self.memgraph.execute(
+            f"CREATE CONSTRAINT ON (k:{KEYWORD_LABEL}) ASSERT k.{NAME_PROPERTY} IS UNIQUE;"
+        )
+        self.memgraph.execute(
+            f"CREATE CONSTRAINT ON (u:{URL_LABEL}) ASSERT u.{NAME_PROPERTY} IS UNIQUE;"
+        )
+        self.memgraph.execute(
+            f"CREATE CONSTRAINT ON (w:{WEBSITE_LABEL}) ASSERT w.{NAME_PROPERTY} IS UNIQUE;"
+        )
+        self.memgraph.execute(
+            f"CREATE CONSTRAINT ON (e:{EMAIL_LABEL}) ASSERT e.{NAME_PROPERTY} IS UNIQUE;"
+        )
+        self.memgraph.execute(
+            f"CREATE CONSTRAINT ON (s:{SOURCE_LABEL}) ASSERT s.{NAME_PROPERTY} IS UNIQUE;"
+        )
+        # Create indexes
+        self.memgraph.execute(f"CREATE INDEX ON :{CONCEPT_LABEL}({NAME_PROPERTY});")
+        self.memgraph.execute(f"CREATE INDEX ON :{KEYWORD_LABEL}({NAME_PROPERTY});")
+        self.memgraph.execute(f"CREATE INDEX ON :{URL_LABEL}({NAME_PROPERTY});")
+        self.memgraph.execute(f"CREATE INDEX ON :{WEBSITE_LABEL}({NAME_PROPERTY});")
+        self.memgraph.execute(f"CREATE INDEX ON :{EMAIL_LABEL}({NAME_PROPERTY});")
+        self.memgraph.execute(f"CREATE INDEX ON :{SOURCE_LABEL}({NAME_PROPERTY});")
+        logger.info("Constraints and indexes created")
 
     def add_knowledge(
         self,
@@ -78,30 +122,45 @@ class KnowledgeDatabase:
         """Add a piece of knowledge to the database."""
         for concept in concepts:
             merge(connection=self.memgraph).node(
-                labels=CONCEPT_LABEL,
+                labels=[CONCEPT_LABEL, self.database],
                 name=concept.name,
+                variable="n",
+            ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
+                item=f"n.{CREATED_AT_PROPERTY}",
+                operator=Operator.ASSIGNMENT,
+                literal=f"{datetime.now(tz=UTC).isoformat()}",
             ).execute()
             for url in concept.urls:
                 website = self._extract_website_from_url(url)
                 merge(connection=self.memgraph).node(
-                    labels=URL_LABEL,
+                    labels=[URL_LABEL, self.database],
                     name=url,
+                    variable="n",
+                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
+                    item=f"n.{CREATED_AT_PROPERTY}",
+                    operator=Operator.ASSIGNMENT,
+                    literal=f"{datetime.now(tz=UTC).isoformat()}",
                 ).execute()
                 merge(connection=self.memgraph).node(
-                    labels=WEBSITE_LABEL,
+                    labels=[WEBSITE_LABEL, self.database],
                     name=website,
+                    variable="n",
+                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
+                    item=f"n.{CREATED_AT_PROPERTY}",
+                    operator=Operator.ASSIGNMENT,
+                    literal=f"{datetime.now(tz=UTC).isoformat()}",
                 ).execute()
 
                 match(connection=self.memgraph).node(
-                    labels=CONCEPT_LABEL,
+                    labels=[CONCEPT_LABEL, self.database],
                     name=concept.name,
                     variable="ud",
                 ).match().node(
-                    labels=URL_LABEL,
+                    labels=[URL_LABEL, self.database],
                     name=url,
                     variable="us",
                 ).match().node(
-                    labels=WEBSITE_LABEL,
+                    labels=[WEBSITE_LABEL, self.database],
                     name=website,
                     variable="ws",
                 ).merge().node(
@@ -120,32 +179,47 @@ class KnowledgeDatabase:
 
             for keyword in concept.keywords:
                 merge(connection=self.memgraph).node(
-                    labels=KEYWORD_LABEL,
+                    labels=[KEYWORD_LABEL, self.database],
                     name=keyword,
+                    variable="n",
+                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
+                    item=f"n.{CREATED_AT_PROPERTY}",
+                    operator=Operator.ASSIGNMENT,
+                    literal=f"{datetime.now(tz=UTC).isoformat()}",
                 ).execute()
                 merge(connection=self.memgraph).node(
-                    labels=EMAIL_LABEL,
+                    labels=[EMAIL_LABEL, self.database],
                     name=email_id,
+                    variable="n",
+                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
+                    item=f"n.{CREATED_AT_PROPERTY}",
+                    operator=Operator.ASSIGNMENT,
+                    literal=f"{datetime.now(tz=UTC).isoformat()}",
                 ).execute()
                 merge(connection=self.memgraph).node(
-                    labels=SOURCE_LABEL,
+                    labels=[SOURCE_LABEL, self.database],
                     name=source,
+                    variable="n",
+                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
+                    item=f"n.{CREATED_AT_PROPERTY}",
+                    operator=Operator.ASSIGNMENT,
+                    literal=f"{datetime.now(tz=UTC).isoformat()}",
                 ).execute()
 
                 match(connection=self.memgraph).node(
-                    labels=CONCEPT_LABEL,
+                    labels=[CONCEPT_LABEL, self.database],
                     name=concept.name,
                     variable="kd",
                 ).match().node(
-                    labels=KEYWORD_LABEL,
+                    labels=[KEYWORD_LABEL, self.database],
                     name=keyword,
                     variable="ks",
                 ).match().node(
-                    labels=EMAIL_LABEL,
+                    labels=[EMAIL_LABEL, self.database],
                     name=email_id,
                     variable="es",
                 ).match().node(
-                    labels=SOURCE_LABEL,
+                    labels=[SOURCE_LABEL, self.database],
                     name=source,
                     variable="ss",
                 ).merge().node(
