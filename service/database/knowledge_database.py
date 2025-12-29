@@ -19,6 +19,7 @@ SOURCE_LABEL = "Source"
 NAME_PROPERTY = "name"
 CREATED_AT_PROPERTY = "created_at"
 URL_PROPERTY = "url"
+TOPIC_PROPERTY = "topic"
 
 REPRESENTS_RELATIONSHIP = "REPRESENTS"
 DESCRIBES_RELATIONSHIP = "DESCRIBES"
@@ -30,7 +31,24 @@ CUSTOM_CQL_ON_CREATE = "ON CREATE"
 
 
 class KnowledgeConcept(BaseModel):
-    """A model representing a knowledge concept.
+    """A model representing a knowledge concept."""
+
+    name: str
+    topic: str
+    urls: list[str]
+    keywords: list[str]
+
+
+class KnowledgeDatabase:
+    """A simple knowledge database class.
+
+    Args:
+        host (str): The host of the knowledge database.
+        port (int): The port of the knowledge database.
+        username (str): The username for the knowledge database.
+        password (str): The password for the knowledge database.
+        encrypted (bool): Whether the connection is encrypted.
+        database (str): The name of the database to use.
 
     Common Cypher queries:
     - Count all nodes: MATCH (n) RETURN count(n)
@@ -42,15 +60,8 @@ class KnowledgeConcept(BaseModel):
         WHERE datetime(c.created_at) >= datetime('2025-12-29T00:00:00Z')
         AND datetime(c.created_at) <= datetime('2025-12-29T23:59:59Z')
         RETURN c
+
     """
-
-    name: str
-    urls: list[str]
-    keywords: list[str]
-
-
-class KnowledgeDatabase:
-    """A simple knowledge database class."""
 
     def __init__(
         self,
@@ -124,6 +135,7 @@ class KnowledgeDatabase:
             merge(connection=self.memgraph).node(
                 labels=[CONCEPT_LABEL, self.database],
                 name=concept.name,
+                topic=concept.topic,
                 variable="n",
             ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
                 item=f"n.{CREATED_AT_PROPERTY}",

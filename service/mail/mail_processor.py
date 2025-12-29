@@ -5,10 +5,10 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, Field, field_serializer
 
 from service.database.azure_nosql_repo import AzureRepository
-from service.database.knowledge_database import KnowledgeDatabase
+from service.database.knowledge_database import KnowledgeConcept, KnowledgeDatabase
 from service.file.azure_blob_repo import AzureBlobRepository, RepoBlob
 from service.llm.knowledge_extraction_llm import (
     KnowledgeExtractionLLM,
@@ -33,6 +33,7 @@ class ProcessedMail(BaseModel):
     concept_count: int
     keyword_count: int
     url_count: int
+    concepts: list[KnowledgeConcept]
 
     @field_serializer("processed_at")
     def serialise_date(self, value: datetime) -> str:
@@ -63,6 +64,7 @@ class ProcessingMailAudit(BaseModel):
     keyword_count: int
     url_count: int
     processing_steps: list[ProcessingAudit]
+    concepts: list[KnowledgeConcept]
 
     @field_serializer("processing_start_time", "processing_end_time")
     def serialise_date(self, value: datetime) -> str:
@@ -73,7 +75,9 @@ class ProcessingMailAudit(BaseModel):
 class ProcessingAudit(BaseModel):
     """Represents an audit record for email processing instance, to be stored in the database."""
 
-    id: str = "mm-" + datetime.now(tz=UTC).isoformat() + "-" + str(uuid.uuid4())
+    id: str = Field(
+        default_factory=lambda: f"mm-{datetime.now(tz=UTC).isoformat()}-{uuid.uuid4()}",
+    )
     total_emails_fetched: int
     total_emails_processed: int
     mail_start_window: datetime | None
@@ -122,7 +126,9 @@ class MailProcessor:
         approved_mails = self.config_repo.read_item("approved_mails").get("mails", [])
         logger.info(f"✓ Loaded {len(approved_mails)} approved mails from config repo")
         llm_prompt = self.config_repo.read_item("llm_prompt").get("prompt", "")
-        logger.info(f"✓ Loaded LLM prompt from config repo")
+        topic_prompt = self.config_repo.read_item("concept_topic").get("prompt", "")
+        topic_list = self.config_repo.read_item("concept_topic").get("topic", [])
+        logger.info(f"✓ Loaded LLM prompt from config repo. Topic list: {topic_list}")
         emails = self.fetcher.fetch_basic_emails(days_ago=days, max_emails=0)
         mails_to_process: list[Mail] = [
             email
@@ -140,7 +146,8 @@ class MailProcessor:
             body_size_before = len(email.body)
 
             processed_mail, processing_audits = self.process_email(
-                email=email, llm_prompt=llm_prompt
+                email=email,
+                llm_prompt=f"{llm_prompt}\n{topic_prompt} {topic_list}",
             )
             process_end = datetime.now(tz=UTC)
 
@@ -166,6 +173,7 @@ class MailProcessor:
                 concept_count=processed_mail.concept_count,
                 keyword_count=processed_mail.keyword_count,
                 url_count=processed_mail.url_count,
+                concepts=processed_mail.concepts,
             )
             process_audits.append(mail_audit_record)
             self.blob_repo.upload_blob(
@@ -227,6 +235,7 @@ class MailProcessor:
                 url_count=sum(
                     len(concept.urls) for concept in metered_response.concepts
                 ),
+                concepts=metered_response.concepts,
             ),
             audits,
         )
