@@ -1,0 +1,33 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "func",
+			"label": "func: host start",
+			"command": "host start --port 8000",
+			"problemMatcher": "$func-python-watch",
+			"isBackground": true,
+			"dependsOn": "uv sync",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "uv sync",
+			"type": "shell",
+			"osx": {
+				"command": "uv sync"
+			},
+			"windows": {
+				"command": "uv sync"
+			},
+			"linux": {
+				"command": "uv sync"
+			},
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		}
+	]
+}
