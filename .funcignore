@@ -1,0 +1,9 @@
+.git*
+.vscode
+.env
+local.settings.json
+test
+.venv
+analysis/
+bruno/
+data/
