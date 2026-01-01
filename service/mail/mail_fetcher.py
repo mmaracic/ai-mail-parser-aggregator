@@ -3,7 +3,7 @@
 import email
 import imaplib
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from email.header import decode_header
 from email.message import EmailMessage
 
@@ -90,8 +90,33 @@ class MailFetcher:
         (BODYSTRUCTURE) - Structure without content (useful to see attachments without downloading)
         (BODY[TEXT]) - Only body content, no headers
         """
-        date = self._get_date_days_ago(days_ago)
-        status, messages = self.mail.search(None, f"SINCE {date}")
+        after_date = self._get_date_days_ago(days_ago)
+        return self.fetch_basic_emails_in_range(
+            after_date=after_date,
+            before_date=datetime.now(tz=UTC).date() + timedelta(days=1),
+            max_emails=max_emails,
+        )
+
+    def fetch_basic_emails_in_range(
+        self, after_date: date, before_date: date, max_emails: int = 10
+    ) -> list[Mail]:
+        """Fetch basic email info from the IMAP server for a given date range.
+
+        After date is inclusive, before date is exclusive.
+
+        Args:
+            after_date (date): Start date (inclusive).
+            before_date (date): End date (exclusive).
+            max_emails (int): Maximum number of emails to fetch.
+
+        Returns:
+            list[Mail]: List of fetched emails.
+
+        """
+        status, messages = self.mail.search(
+            None,
+            f"SINCE {self._get_formated_date(after_date)} BEFORE {self._get_formated_date(before_date)}",
+        )
         email_ids = messages[0].split()
 
         mails = []
@@ -152,8 +177,33 @@ class MailFetcher:
         SENTBEFORE dd-mmm-yyyy - Sent before date
         SENTSINCE dd-mmm-yyyy - Sent since date
         """
-        date = self._get_date_days_ago(days_ago)
-        status, messages = self.mail.search(None, f"SINCE {date}")
+        after_date = self._get_date_days_ago(days_ago)
+        return self.fetch_full_emails_in_range(
+            after_date=after_date,
+            before_date=datetime.now(tz=UTC).date() + timedelta(days=1),
+            max_emails=max_emails,
+        )
+
+    def fetch_full_emails_in_range(
+        self, after_date: date, before_date: date, max_emails: int = 10
+    ) -> list[Mail]:
+        """Fetch full emails from the IMAP server for a given date range.
+
+        After date is inclusive, before date is exclusive.
+
+        Args:
+            after_date (date): Start date (inclusive).
+            before_date (date): End date (exclusive).
+            max_emails (int): Maximum number of emails to fetch.
+
+        Returns:
+            list[Mail]: List of fetched emails.
+
+        """
+        status, messages = self.mail.search(
+            None,
+            f"SINCE {self._get_formated_date(after_date)} BEFORE {self._get_formated_date(before_date)}",
+        )
         email_ids = messages[0].split()
 
         # Fetch and process emails
@@ -169,9 +219,13 @@ class MailFetcher:
         """Fetch a single email by its ID."""
         return self._extract_full_email(email_id)
 
-    def _get_date_days_ago(self, days: int) -> str:
+    def _get_date_days_ago(self, days: int) -> date:
         """Get date string for 'days' ago in format dd-MMM-YYYY."""
-        return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%d-%b-%Y")
+        return (datetime.now(tz=UTC) - timedelta(days=days)).date()
+
+    def _get_formated_date(self, date: date) -> str:
+        """Get date string for given date in format dd-MMM-YYYY."""
+        return date.strftime("%d-%b-%Y")
 
     # Can be used to decode headers like subject or filenames
     def _decode_header(self, header) -> str:

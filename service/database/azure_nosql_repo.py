@@ -81,3 +81,19 @@ class AzureRepository:
         """
         result = self.container.delete_item(item=item_id, partition_key=item_id)
         return result
+
+    def read_most_recent_items(self, limit: int) -> list[dict]:
+        """Retrieve the N most recent items based on _ts timestamp.
+
+        Args:
+            limit (int): The number of most recent items to retrieve.
+
+        Returns:
+            list[dict]: List of the most recent items ordered by timestamp descending.
+
+        """
+        query = f"SELECT * FROM c ORDER BY c._ts DESC OFFSET 0 LIMIT {limit}"
+        items = list(
+            self.container.query_items(query=query, enable_cross_partition_query=True)
+        )
+        return items

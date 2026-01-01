@@ -29,3 +29,18 @@ Run the application with:
 ```
 uv run -m  application
 ```
+
+## Deployment
+Azure deployment branch is: azure-deployment
+Deployment files added or changed are based on these two projects:
+* https://github.com/mmaracic/ai-agent-azure-pcbuilder/blob/main/pcbuilder-api
+
+* https://learn.microsoft.com/en-us/samples/azure-samples/fastapi-on-azure-functions/fastapi-on-azure-functions/
+    * https://github.com/Azure-Samples/fastapi-on-azure-functions/
+
+My project is more updated, with helpful hints and error descriptions.
+
+### Running locally
+Through task: func host start
+
+Note: First time a runtime needs to be selected, select Python - usually under number 4. It is added to `local.settings.json` under FUNCTIONS_WORKER_RUNTIME.

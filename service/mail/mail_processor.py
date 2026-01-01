@@ -3,7 +3,7 @@
 import logging
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from pydantic import BaseModel, Field, field_serializer
 
@@ -123,13 +123,24 @@ class MailProcessor:
 
     def process_emails(self, days: int = 7) -> int:
         """Fetch and process emails from the last 'days' days."""
+        after_date = (datetime.now(tz=UTC) - timedelta(days=days)).date()
+        before_date = datetime.now(tz=UTC).date() + timedelta(days=1)
+        return self.process_emails_in_range(after_date, before_date)
+
+    def process_emails_in_range(self, after_date: date, before_date: date) -> int:
+        """Fetch and process emails in the specified date range."""
+        emails = self.fetcher.fetch_basic_emails_in_range(
+            after_date=after_date,
+            before_date=before_date,
+            max_emails=0,
+        )
+        logger.info(f"✓ Fetched {len(emails)} emails from mail server")
         approved_mails = self.config_repo.read_item("approved_mails").get("mails", [])
         logger.info(f"✓ Loaded {len(approved_mails)} approved mails from config repo")
         llm_prompt = self.config_repo.read_item("llm_prompt").get("prompt", "")
         topic_prompt = self.config_repo.read_item("concept_topic").get("prompt", "")
         topic_list = self.config_repo.read_item("concept_topic").get("topic", [])
         logger.info(f"✓ Loaded LLM prompt from config repo. Topic list: {topic_list}")
-        emails = self.fetcher.fetch_basic_emails(days_ago=days, max_emails=0)
         mails_to_process: list[Mail] = [
             email
             for email in emails
