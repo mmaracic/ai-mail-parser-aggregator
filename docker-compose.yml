@@ -3,6 +3,7 @@ services:
     image: memgraph/memgraph-mage:3.7.1
     container_name: memgraph-mage
     pull_policy: always
+    restart: unless-stopped
     ports:
       - "7687:7687"
       - "7444:7444"
@@ -22,6 +23,7 @@ services:
     image: memgraph/lab:3.6.2
     container_name: memgraph-lab
     pull_policy: always
+    restart: unless-stopped
     ports:
       - "3000:3000"
     depends_on:

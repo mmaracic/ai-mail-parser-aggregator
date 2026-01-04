@@ -94,6 +94,7 @@ async def lifespan(app: FastAPI):
         )
 
         mail_processor = MailProcessor(
+            source=os.getenv("DATA_SOURCE", "localhost"),
             fetcher=mail_fetcher,
             audit_repo=audit_repo,
             config_repo=config_repo,

@@ -1,7 +1,7 @@
 """Module for managing a knowledge database."""
 
-from datetime import UTC, datetime
 import logging
+from datetime import datetime
 
 from gqlalchemy import Memgraph, match, merge
 from gqlalchemy.query_builders.memgraph_query_builder import Operator
@@ -128,6 +128,7 @@ class KnowledgeDatabase:
         self,
         concepts: list[KnowledgeConcept],
         email_id: str,
+        email_datetime: datetime,
         source: str,
     ) -> None:
         """Add a piece of knowledge to the database."""
@@ -140,7 +141,7 @@ class KnowledgeDatabase:
             ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
                 item=f"n.{CREATED_AT_PROPERTY}",
                 operator=Operator.ASSIGNMENT,
-                literal=f"{datetime.now(tz=UTC).isoformat()}",
+                literal=f"{email_datetime.isoformat()}",
             ).execute()
             for url in concept.urls:
                 website = self._extract_website_from_url(url)
@@ -151,7 +152,7 @@ class KnowledgeDatabase:
                 ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
                     item=f"n.{CREATED_AT_PROPERTY}",
                     operator=Operator.ASSIGNMENT,
-                    literal=f"{datetime.now(tz=UTC).isoformat()}",
+                    literal=f"{email_datetime.isoformat()}",
                 ).execute()
                 merge(connection=self.memgraph).node(
                     labels=[WEBSITE_LABEL, self.database],
@@ -160,7 +161,7 @@ class KnowledgeDatabase:
                 ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
                     item=f"n.{CREATED_AT_PROPERTY}",
                     operator=Operator.ASSIGNMENT,
-                    literal=f"{datetime.now(tz=UTC).isoformat()}",
+                    literal=f"{email_datetime.isoformat()}",
                 ).execute()
 
                 match(connection=self.memgraph).node(
@@ -197,7 +198,7 @@ class KnowledgeDatabase:
                 ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
                     item=f"n.{CREATED_AT_PROPERTY}",
                     operator=Operator.ASSIGNMENT,
-                    literal=f"{datetime.now(tz=UTC).isoformat()}",
+                    literal=f"{email_datetime.isoformat()}",
                 ).execute()
                 merge(connection=self.memgraph).node(
                     labels=[EMAIL_LABEL, self.database],
@@ -206,7 +207,7 @@ class KnowledgeDatabase:
                 ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
                     item=f"n.{CREATED_AT_PROPERTY}",
                     operator=Operator.ASSIGNMENT,
-                    literal=f"{datetime.now(tz=UTC).isoformat()}",
+                    literal=f"{email_datetime.isoformat()}",
                 ).execute()
                 merge(connection=self.memgraph).node(
                     labels=[SOURCE_LABEL, self.database],
@@ -215,7 +216,7 @@ class KnowledgeDatabase:
                 ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
                     item=f"n.{CREATED_AT_PROPERTY}",
                     operator=Operator.ASSIGNMENT,
-                    literal=f"{datetime.now(tz=UTC).isoformat()}",
+                    literal=f"{email_datetime.isoformat()}",
                 ).execute()
 
                 match(connection=self.memgraph).node(

@@ -80,6 +80,7 @@ class ProcessingAudit(BaseModel):
     )
     total_emails_fetched: int
     total_emails_processed: int
+    source: str
     mail_start_window: datetime | None
     mail_end_window: datetime | None
     processing_start_time: datetime
@@ -102,6 +103,7 @@ class MailProcessor:
 
     def __init__(
         self,
+        source: str,
         fetcher: MailFetcher,
         audit_repo: AzureRepository,
         config_repo: AzureRepository,
@@ -112,6 +114,7 @@ class MailProcessor:
         knowledge_database: KnowledgeDatabase,
     ) -> None:
         """Initialize MailProcessor with a MailFetcher and approved email list."""
+        self.source = source
         self.fetcher = fetcher
         self.audit_repo = audit_repo
         self.config_repo = config_repo
@@ -197,6 +200,7 @@ class MailProcessor:
             )
         total_process_end = datetime.now(tz=UTC)
         audit_record = ProcessingAudit(
+            source=self.source,
             total_emails_fetched=len(emails),
             total_emails_processed=len(mails_to_process),
             mail_start_window=mail_start_window,
@@ -226,6 +230,7 @@ class MailProcessor:
         self.knowledge_database.add_knowledge(
             concepts=metered_response.concepts,
             email_id=email.get_identifier(),
+            email_datetime=email.date,
             source=self._extract_email_from_sender(email.sender),
         )
 
