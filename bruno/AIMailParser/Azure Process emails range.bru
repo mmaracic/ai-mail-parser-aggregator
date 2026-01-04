@@ -1,0 +1,22 @@
+meta {
+  name: Azure Process emails range
+  type: http
+  seq: 8
+}
+
+get {
+  url: https://mm-mail-parser-function-app-cvd4efbhhvhscvgf.westeurope-01.azurewebsites.net/process-emails-range?after_date=2025-12-26&before_date=2025-12-27&code
+  body: none
+  auth: inherit
+}
+
+params:query {
+  after_date: 2025-12-26
+  before_date: 2025-12-27
+  code: 
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

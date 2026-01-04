@@ -16,14 +16,25 @@
 			"label": "uv sync",
 			"type": "shell",
 			"osx": {
-				"command": "uv sync"
+				"command": "uv sync && uv pip freeze > requirements.txt"
 			},
 			"windows": {
-				"command": "uv sync"
+				"command": "uv sync && uv pip freeze > requirements.txt"
 			},
 			"linux": {
-				"command": "uv sync"
+				"command": "uv sync && uv pip freeze > requirements.txt"
 			},
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "prepare deployment",
+			"detail": "Not used, was used to install problematic dependencies locally to avoid issues during deployment to Azure.",
+			"type": "shell",
+			"dependsOn": "uv sync",
+			"command": "pip install -r requirements.txt --target .python_packages/lib/site-packages --no-user",
 			"problemMatcher": [],
 			"options": {
 				"cwd": "${workspaceFolder}"

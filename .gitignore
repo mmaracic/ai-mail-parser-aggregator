@@ -3,5 +3,6 @@ __pycache__/
 .env
 requirements.txt
 local.settings.json
+requirements.txt
 
 data/

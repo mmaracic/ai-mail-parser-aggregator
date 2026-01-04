@@ -9,6 +9,9 @@ import azure.functions as func
 from application import app as fastapi_app
 from application import process_emails_in_range
 
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("azure.cosmos").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.FUNCTION)

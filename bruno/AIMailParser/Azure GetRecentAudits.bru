@@ -1,0 +1,20 @@
+meta {
+  name: Azure GetRecentAudits
+  type: http
+  seq: 7
+}
+
+get {
+  url: https://mm-mail-parser-function-app-cvd4efbhhvhscvgf.westeurope-01.azurewebsites.net/get-recent-audits?code
+  body: none
+  auth: inherit
+}
+
+params:query {
+  code: 
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
