@@ -3,8 +3,7 @@
 import logging
 from datetime import datetime
 
-from gqlalchemy import Memgraph, match, merge
-from gqlalchemy.query_builders.memgraph_query_builder import Operator
+from neo4j import GraphDatabase
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -75,53 +74,59 @@ class KnowledgeDatabase:
         """Initialize the knowledge database."""
         logger.info("Connecting to knowledge database with encrypted=%s", encrypted)
         self.database = database
-        self.memgraph = Memgraph(
-            host=host,
-            port=port,
-            username=username,
-            password=password,
+        uri = f"bolt://{host}:{port}"
+        self.client = GraphDatabase.driver(
+            uri=uri,
+            auth=(username, password),
             encrypted=encrypted,
+            trust="TRUST_ALL_CERTIFICATES",
         )
+        self.bookmark_manager = GraphDatabase.bookmark_manager()
         # Test the connection
         # Equivalent to: MATCH (n) RETURN count(n);
-        result = next(
-            match(connection=self.memgraph)
-            .node(variable="n")
-            .return_({"count(n)": "count"})
-            .execute()
-        )
-        logger.info("%s nodes in the knowledge database", result)
+        with self.client.session(
+            default_access_mode="READ",
+            bookmark_manager=self.bookmark_manager,
+        ) as session:
+            result = session.run("MATCH (n) RETURN count(n);").single().value()
+            logger.info("%s nodes in the knowledge database", result)
         self.create_constraints_and_indexes()
 
     def create_constraints_and_indexes(self) -> None:
         """Create constraints and indexes for the knowledge database."""
         logger.info("Creating constraints and indexes for the knowledge database")
-        # Create uniqueness constraints
-        self.memgraph.execute(
-            f"CREATE CONSTRAINT ON (c:{CONCEPT_LABEL}) ASSERT c.{NAME_PROPERTY} IS UNIQUE;"
-        )
-        self.memgraph.execute(
-            f"CREATE CONSTRAINT ON (k:{KEYWORD_LABEL}) ASSERT k.{NAME_PROPERTY} IS UNIQUE;"
-        )
-        self.memgraph.execute(
-            f"CREATE CONSTRAINT ON (u:{URL_LABEL}) ASSERT u.{NAME_PROPERTY} IS UNIQUE;"
-        )
-        self.memgraph.execute(
-            f"CREATE CONSTRAINT ON (w:{WEBSITE_LABEL}) ASSERT w.{NAME_PROPERTY} IS UNIQUE;"
-        )
-        self.memgraph.execute(
-            f"CREATE CONSTRAINT ON (e:{EMAIL_LABEL}) ASSERT e.{NAME_PROPERTY} IS UNIQUE;"
-        )
-        self.memgraph.execute(
-            f"CREATE CONSTRAINT ON (s:{SOURCE_LABEL}) ASSERT s.{NAME_PROPERTY} IS UNIQUE;"
-        )
-        # Create indexes
-        self.memgraph.execute(f"CREATE INDEX ON :{CONCEPT_LABEL}({NAME_PROPERTY});")
-        self.memgraph.execute(f"CREATE INDEX ON :{KEYWORD_LABEL}({NAME_PROPERTY});")
-        self.memgraph.execute(f"CREATE INDEX ON :{URL_LABEL}({NAME_PROPERTY});")
-        self.memgraph.execute(f"CREATE INDEX ON :{WEBSITE_LABEL}({NAME_PROPERTY});")
-        self.memgraph.execute(f"CREATE INDEX ON :{EMAIL_LABEL}({NAME_PROPERTY});")
-        self.memgraph.execute(f"CREATE INDEX ON :{SOURCE_LABEL}({NAME_PROPERTY});")
+
+        with self.client.session(
+            default_access_mode="WRITE",
+            bookmark_manager=self.bookmark_manager,
+        ) as session:
+            # Create uniqueness constraints
+            session.run(
+                f"CREATE CONSTRAINT ON (c:{CONCEPT_LABEL}) ASSERT c.{NAME_PROPERTY} IS UNIQUE;"
+            )
+            session.run(
+                f"CREATE CONSTRAINT ON (k:{KEYWORD_LABEL}) ASSERT k.{NAME_PROPERTY} IS UNIQUE;"
+            )
+            session.run(
+                f"CREATE CONSTRAINT ON (u:{URL_LABEL}) ASSERT u.{NAME_PROPERTY} IS UNIQUE;"
+            )
+            session.run(
+                f"CREATE CONSTRAINT ON (w:{WEBSITE_LABEL}) ASSERT w.{NAME_PROPERTY} IS UNIQUE;"
+            )
+            session.run(
+                f"CREATE CONSTRAINT ON (e:{EMAIL_LABEL}) ASSERT e.{NAME_PROPERTY} IS UNIQUE;"
+            )
+            session.run(
+                f"CREATE CONSTRAINT ON (s:{SOURCE_LABEL}) ASSERT s.{NAME_PROPERTY} IS UNIQUE;"
+            )
+            # Create indexes
+            session.run(f"CREATE INDEX ON :{CONCEPT_LABEL}({NAME_PROPERTY});")
+            session.run(f"CREATE INDEX ON :{KEYWORD_LABEL}({NAME_PROPERTY});")
+            session.run(f"CREATE INDEX ON :{URL_LABEL}({NAME_PROPERTY});")
+            session.run(f"CREATE INDEX ON :{WEBSITE_LABEL}({NAME_PROPERTY});")
+            session.run(f"CREATE INDEX ON :{EMAIL_LABEL}({NAME_PROPERTY});")
+            session.run(f"CREATE INDEX ON :{SOURCE_LABEL}({NAME_PROPERTY});")
+
         logger.info("Constraints and indexes created")
 
     def add_knowledge(
@@ -132,128 +137,69 @@ class KnowledgeDatabase:
         source: str,
     ) -> None:
         """Add a piece of knowledge to the database."""
-        for concept in concepts:
-            merge(connection=self.memgraph).node(
-                labels=[CONCEPT_LABEL, self.database],
-                name=concept.name,
-                topic=concept.topic,
-                variable="n",
-            ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
-                item=f"n.{CREATED_AT_PROPERTY}",
-                operator=Operator.ASSIGNMENT,
-                literal=f"{email_datetime.isoformat()}",
-            ).execute()
-            for url in concept.urls:
-                website = self._extract_website_from_url(url)
-                merge(connection=self.memgraph).node(
-                    labels=[URL_LABEL, self.database],
-                    name=url,
-                    variable="n",
-                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
-                    item=f"n.{CREATED_AT_PROPERTY}",
-                    operator=Operator.ASSIGNMENT,
-                    literal=f"{email_datetime.isoformat()}",
-                ).execute()
-                merge(connection=self.memgraph).node(
-                    labels=[WEBSITE_LABEL, self.database],
-                    name=website,
-                    variable="n",
-                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
-                    item=f"n.{CREATED_AT_PROPERTY}",
-                    operator=Operator.ASSIGNMENT,
-                    literal=f"{email_datetime.isoformat()}",
-                ).execute()
+        created_at_iso = email_datetime.isoformat()
 
-                match(connection=self.memgraph).node(
-                    labels=[CONCEPT_LABEL, self.database],
+        with self.client.session(
+            default_access_mode="WRITE",
+            bookmark_manager=self.bookmark_manager,
+        ) as session:
+            for concept in concepts:
+                # Merge Concept node
+                session.run(
+                    f"""
+                    MERGE (c:{CONCEPT_LABEL}:{self.database} {{{NAME_PROPERTY}: $name}})
+                    ON CREATE SET c.{TOPIC_PROPERTY} = $topic, c.{CREATED_AT_PROPERTY} = $created_at
+                    """,
                     name=concept.name,
-                    variable="ud",
-                ).match().node(
-                    labels=[URL_LABEL, self.database],
-                    name=url,
-                    variable="us",
-                ).match().node(
-                    labels=[WEBSITE_LABEL, self.database],
-                    name=website,
-                    variable="ws",
-                ).merge().node(
-                    variable="us",
-                ).to(
-                    relationship_type=DESCRIBES_RELATIONSHIP,
-                ).node(
-                    variable="ud",
-                ).merge().node(
-                    variable="ws",
-                ).to(
-                    relationship_type=HOSTS_RELATIONSHIP,
-                ).node(
-                    variable="us",
-                ).execute()
+                    topic=concept.topic,
+                    created_at=created_at_iso,
+                )
 
-            for keyword in concept.keywords:
-                merge(connection=self.memgraph).node(
-                    labels=[KEYWORD_LABEL, self.database],
-                    name=keyword,
-                    variable="n",
-                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
-                    item=f"n.{CREATED_AT_PROPERTY}",
-                    operator=Operator.ASSIGNMENT,
-                    literal=f"{email_datetime.isoformat()}",
-                ).execute()
-                merge(connection=self.memgraph).node(
-                    labels=[EMAIL_LABEL, self.database],
-                    name=email_id,
-                    variable="n",
-                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
-                    item=f"n.{CREATED_AT_PROPERTY}",
-                    operator=Operator.ASSIGNMENT,
-                    literal=f"{email_datetime.isoformat()}",
-                ).execute()
-                merge(connection=self.memgraph).node(
-                    labels=[SOURCE_LABEL, self.database],
-                    name=source,
-                    variable="n",
-                ).add_custom_cypher(CUSTOM_CQL_ON_CREATE).set_(
-                    item=f"n.{CREATED_AT_PROPERTY}",
-                    operator=Operator.ASSIGNMENT,
-                    literal=f"{email_datetime.isoformat()}",
-                ).execute()
+                # Process URLs
+                for url in concept.urls:
+                    website = self._extract_website_from_url(url)
 
-                match(connection=self.memgraph).node(
-                    labels=[CONCEPT_LABEL, self.database],
-                    name=concept.name,
-                    variable="kd",
-                ).match().node(
-                    labels=[KEYWORD_LABEL, self.database],
-                    name=keyword,
-                    variable="ks",
-                ).match().node(
-                    labels=[EMAIL_LABEL, self.database],
-                    name=email_id,
-                    variable="es",
-                ).match().node(
-                    labels=[SOURCE_LABEL, self.database],
-                    name=source,
-                    variable="ss",
-                ).merge().node(
-                    variable="ks",
-                ).to(
-                    relationship_type=REPRESENTS_RELATIONSHIP,
-                ).node(
-                    variable="kd",
-                ).merge().node(
-                    variable="es",
-                ).to(
-                    relationship_type=CONTAINS_RELATIONSHIP,
-                ).node(
-                    variable="ks",
-                ).merge().node(
-                    variable="ss",
-                ).to(
-                    relationship_type=SENDS_RELATIONSHIP,
-                ).node(
-                    variable="es",
-                ).execute()
+                    # Merge URL and Website nodes, create relationships
+                    session.run(
+                        f"""
+                        MERGE (u:{URL_LABEL}:{self.database} {{{NAME_PROPERTY}: $url}})
+                        ON CREATE SET u.{CREATED_AT_PROPERTY} = $created_at
+                        MERGE (w:{WEBSITE_LABEL}:{self.database} {{{NAME_PROPERTY}: $website}})
+                        ON CREATE SET w.{CREATED_AT_PROPERTY} = $created_at
+                        WITH u, w
+                        MATCH (c:{CONCEPT_LABEL}:{self.database} {{{NAME_PROPERTY}: $concept_name}})
+                        MERGE (u)-[:{DESCRIBES_RELATIONSHIP}]->(c)
+                        MERGE (w)-[:{HOSTS_RELATIONSHIP}]->(u)
+                        """,
+                        url=url,
+                        website=website,
+                        concept_name=concept.name,
+                        created_at=created_at_iso,
+                    )
+
+                # Process keywords
+                for keyword in concept.keywords:
+                    # Merge Keyword, Email, and Source nodes, create relationships
+                    session.run(
+                        f"""
+                        MERGE (k:{KEYWORD_LABEL}:{self.database} {{{NAME_PROPERTY}: $keyword}})
+                        ON CREATE SET k.{CREATED_AT_PROPERTY} = $created_at
+                        MERGE (e:{EMAIL_LABEL}:{self.database} {{{NAME_PROPERTY}: $email_id}})
+                        ON CREATE SET e.{CREATED_AT_PROPERTY} = $created_at
+                        MERGE (s:{SOURCE_LABEL}:{self.database} {{{NAME_PROPERTY}: $source}})
+                        ON CREATE SET s.{CREATED_AT_PROPERTY} = $created_at
+                        WITH k, e, s
+                        MATCH (c:{CONCEPT_LABEL}:{self.database} {{{NAME_PROPERTY}: $concept_name}})
+                        MERGE (k)-[:{REPRESENTS_RELATIONSHIP}]->(c)
+                        MERGE (e)-[:{CONTAINS_RELATIONSHIP}]->(k)
+                        MERGE (s)-[:{SENDS_RELATIONSHIP}]->(e)
+                        """,
+                        keyword=keyword,
+                        email_id=email_id,
+                        source=source,
+                        concept_name=concept.name,
+                        created_at=created_at_iso,
+                    )
 
     def _extract_website_from_url(self, url: str) -> str:
         """Extract the website from a URL."""
