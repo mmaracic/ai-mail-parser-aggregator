@@ -1,0 +1,19 @@
+#Count all nodes:
+MATCH (n) RETURN count(n)
+
+#Delete all nodes:
+MATCH (n) DETACH DELETE n
+
+#Return all nodes (limited):
+MATCH (n) RETURN n LIMIT 200
+
+#Return all nodes with relationships (limited):
+MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 200
+
+#Return all concepts within a time range:
+MATCH (c:Concept)
+WHERE datetime(c.created_at) >= datetime('2025-12-29T00:00:00Z')
+AND datetime(c.created_at) <= datetime('2025-12-29T23:59:59Z')
+RETURN c
+
+
