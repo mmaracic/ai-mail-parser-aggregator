@@ -2,6 +2,10 @@
 
 ## Application functions
 
+### Structured application
+* API endpointd divided into audit, processing and analytics routers.
+* Structured application state to be able to safely fetch app services from request context dependency. 
+
 ### Mail fetching
 * Fetches an email and processes and separates components: subject, sender, recipient, body and attachments.
 * Generic Python libraries used, no custom mail provider services or libraries.

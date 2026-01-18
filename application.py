@@ -2,39 +2,42 @@
 
 import logging
 import os
-import traceback
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import date
 from imaplib import IMAP4
+from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 
+from api.application_model import AppState
 from service.database.azure_nosql_repo import AzureRepository
-from service.database.azure_service import AzureService, BasicProcessingAudit
+from service.database.azure_service import AzureService
 from service.database.knowledge_database import KnowledgeDatabase
+from service.database.knowledge_service import KnowledgeService
 from service.file.azure_blob_repo import AzureBlobRepository
 from service.llm.knowledge_extraction_llm import KnowledgeExtractionLLM
 from service.mail.mail_fetcher import (
-    Attachment,
-    Mail,
     MailFetcher,
     MailFetcherConfiguration,
 )
 from service.mail.mail_processor import MailProcessor
 from service.text import NewsletterCleaner
 from service.text.text_processor import HtmlProcessor, TextProcessorWrapper
+from api.audit_api_router import router as audit_router
+from api.processing_api_router import router as processing_router
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("azure.cosmos").setLevel(logging.WARNING)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
+    logging.WARNING,
+)
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
     """Manage application lifecycle."""
-
     if not hasattr(app.state, "load_env") or app.state.load_env is True:
         # Load environment variables from .env file
         load_dotenv()
@@ -50,11 +53,10 @@ async def lifespan(app: FastAPI):
         )
         if not config.username or not config.password:
             raise ValueError(
-                "EMAIL_USERNAME and EMAIL_PASSWORD must be set in .env file"
+                "EMAIL_USERNAME and EMAIL_PASSWORD must be set in .env file",
             )
 
         mail_fetcher = MailFetcher(config)
-        app.state.mail_fetcher = mail_fetcher
 
         cosmos_connection_string = os.getenv("AZURE_NOSQL_CONNECTION_STRING", "")
         db_name = os.getenv("DB_NAME", "MailParserDb")
@@ -72,7 +74,6 @@ async def lifespan(app: FastAPI):
         )
 
         azure_service = AzureService(audit_repo)
-        app.state.azure_service = azure_service
 
         blob_repo = AzureBlobRepository(os.getenv("AZURE_BLOB_CONNECTION_STRING", ""))
         blob_container = os.getenv("BLOB_CONTAINER", "processed-emails")
@@ -92,6 +93,7 @@ async def lifespan(app: FastAPI):
             encrypted=os.getenv("MEMGRAPH_ENCRYPTED", "True").lower() == "true",
             database=os.getenv("MEMGRAPH_DATABASE", "knowledge_db"),
         )
+        knowledge_service = KnowledgeService(knowledge_database)
 
         mail_processor = MailProcessor(
             source=os.getenv("DATA_SOURCE", "localhost"),
@@ -101,15 +103,22 @@ async def lifespan(app: FastAPI):
             blob_repo=blob_repo,
             blob_container=blob_container,
             text_processor_wrapper=TextProcessorWrapper(
-                [HtmlProcessor(), NewsletterCleaner()]
+                [HtmlProcessor(), NewsletterCleaner()],
             ),
             knowledge_extraction_llm=knowledge_extraction_llm,
             knowledge_database=knowledge_database,
         )
-        app.state.mail_processor = mail_processor
-        logger.info(f"✓ Connected to {config.imap_server}")
-    except Exception as e:
-        logger.error(f"✗ Failed to initialize mail fetcher: {e}")
+        app_state = AppState(
+            mail_fetcher=mail_fetcher,
+            azure_service=azure_service,
+            mail_processor=mail_processor,
+            knowledge_service=knowledge_service,
+        )
+        app.state.services = app_state
+        logger.info("✓ Connected to %s", config.imap_server)
+
+    except Exception:
+        logger.exception("✗ Failed to initialize mail fetcher")
         raise
 
     yield
@@ -119,8 +128,8 @@ async def lifespan(app: FastAPI):
         try:
             mail_fetcher.close()
             logger.info("✓ Disconnected from mail server")
-        except IMAP4.abort as e:
-            logger.error(f"✗ Failed to disconnect from mail server: {e}")
+        except IMAP4.abort:
+            logger.exception("✗ Failed to disconnect from mail server")
 
 
 app = FastAPI(
@@ -129,6 +138,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.include_router(router=audit_router)
+app.include_router(router=processing_router)
 
 
 @app.get("/health")
@@ -140,106 +151,6 @@ async def health_check(request: Request) -> dict[str, str]:
             "connected" if request.app.state.mail_fetcher else "disconnected"
         ),
     }
-
-
-@app.get("/get-recent-audits", response_model=list[BasicProcessingAudit])
-async def get_recent_audits(
-    request: Request,
-    limit: int = 10,
-) -> list[BasicProcessingAudit]:
-    """Get recent processing audits from Azure Cosmos DB.
-
-    Args:
-        limit: Maximum number of audits to retrieve (default: 10)
-
-    Returns:
-        List of recent processing audits
-
-    """
-    if not request.app.state.azure_service:
-        raise HTTPException(status_code=503, detail="Azure service not initialized")
-
-    try:
-        azure_service: AzureService = request.app.state.azure_service
-        return azure_service.read_most_recent_items(limit=limit)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch audits: {str(e)}")
-
-
-@app.get("/full-email", response_model=Mail | None)
-async def get_full_email(request: Request, email_id: str) -> Mail | None:
-    """Get full email from the configured IMAP server by email ID (GET method).
-
-    Args:
-        email_id: ID of the email to fetch
-    Returns:
-        The fetched email with its metadata and content
-    """
-    if not request.app.state.mail_fetcher:
-        raise HTTPException(status_code=503, detail="Mail fetcher not initialized")
-
-    try:
-        return request.app.state.mail_fetcher.fetch_full_email_by_id(email_id)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")
-
-
-@app.get("/basic-emails", response_model=list[Mail])
-async def get_basic_emails(request: Request, max_emails: int = 10) -> list[Mail]:
-    """Get basic emails from the configured IMAP server (GET method).
-
-    Args:
-        max_emails: Maximum number of emails to fetch (default: 10)
-
-    Returns:
-        List of fetched emails with their metadata and content
-    """
-    if not request.app.state.mail_fetcher:
-        raise HTTPException(status_code=503, detail="Mail fetcher not initialized")
-
-    try:
-        return request.app.state.mail_fetcher.fetch_basic_emails(max_emails=max_emails)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")
-
-
-@app.get("/process-emails-range", response_model=int)
-async def process_emails_in_range(
-    request: Request, after_date: date, before_date: date
-) -> int:
-    """Process emails in the specified date range."""
-    if not request.app.state.mail_processor:
-        raise HTTPException(status_code=503, detail="Mail processor not initialized")
-
-    try:
-        mail_processor: MailProcessor = request.app.state.mail_processor
-        return mail_processor.process_emails_in_range(
-            after_date=after_date, before_date=before_date
-        )
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500, detail=f"Failed to process emails: {str(e)}"
-        )
-
-
-@app.get("/process-emails", response_model=int)
-async def process_emails(request: Request, days: int = 7) -> int:
-    """Process emails from the last 'days' days."""
-    if not request.app.state.mail_processor:
-        raise HTTPException(status_code=503, detail="Mail processor not initialized")
-
-    try:
-        mail_processor: MailProcessor = request.app.state.mail_processor
-        return mail_processor.process_emails(days=days)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500, detail=f"Failed to process emails: {str(e)}"
-        )
 
 
 if __name__ == "__main__":
