@@ -11,9 +11,15 @@ MATCH (n) RETURN n LIMIT 200
 MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 200
 
 #Return all concepts within a time range:
+MATCH (c:Concept)<-[:REPRESENTS]-(k:Keyword)<-[:CONTAINS]-(e:Email)<-[:SENDS]-(s:Source)
+WHERE datetime(c.created_at) >= datetime('2026-01-07T00:00:00Z')
+AND datetime(c.created_at) <= datetime('2026-01-08T23:59:59Z')
+WITH c, COLLECT(DISTINCT e.name) AS email_ids, COLLECT(DISTINCT s.name) AS sources
+RETURN c.name, c.topic, reduce(s = "", x IN email_ids | s + CASE WHEN s = "" THEN x ELSE ", " + x END) AS email_ids, reduce(s = "", x IN sources | s + CASE WHEN s = "" THEN x ELSE ", " + x END) AS sources
+
+#Return the number of concepts created in the last 90 days:
 MATCH (c:Concept)
-WHERE datetime(c.created_at) >= datetime('2025-12-29T00:00:00Z')
-AND datetime(c.created_at) <= datetime('2025-12-29T23:59:59Z')
-RETURN c
-
-
+WITH date(datetime(c.created_at)) AS concept_date, c
+RETURN concept_date, count(c) AS concept_count
+ORDER BY concept_date DESC
+LIMIT 90

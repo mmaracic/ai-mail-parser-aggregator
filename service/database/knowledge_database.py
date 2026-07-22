@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Module for managing a knowledge database."""
 
 import logging
@@ -36,6 +37,15 @@ class KnowledgeConcept(BaseModel):
     topic: str
     urls: list[str]
     keywords: list[str]
+
+
+class KnowledgeConceptBasicInfo(BaseModel):
+    """A model representing a knowledge concept info."""
+
+    name: str
+    topic: str
+    date_created: datetime
+    mail_ids: list[str]
 
 
 class KnowledgeDatabase:
@@ -88,8 +98,9 @@ class KnowledgeDatabase:
             default_access_mode="READ",
             bookmark_manager=self.bookmark_manager,
         ) as session:
-            result = session.run("MATCH (n) RETURN count(n);").single().value()
-            logger.info("%s nodes in the knowledge database", result)
+            result = session.run("MATCH (n) RETURN count(n);").single()
+            count = result.value() if result is not None else 0
+            logger.info("%s nodes in the knowledge database", count)
         self.create_constraints_and_indexes()
 
     def create_constraints_and_indexes(self) -> None:
@@ -102,22 +113,22 @@ class KnowledgeDatabase:
         ) as session:
             # Create uniqueness constraints
             session.run(
-                f"CREATE CONSTRAINT ON (c:{CONCEPT_LABEL}) ASSERT c.{NAME_PROPERTY} IS UNIQUE;"
+                f"CREATE CONSTRAINT ON (c:{CONCEPT_LABEL}) ASSERT c.{NAME_PROPERTY} IS UNIQUE;",
             )
             session.run(
-                f"CREATE CONSTRAINT ON (k:{KEYWORD_LABEL}) ASSERT k.{NAME_PROPERTY} IS UNIQUE;"
+                f"CREATE CONSTRAINT ON (k:{KEYWORD_LABEL}) ASSERT k.{NAME_PROPERTY} IS UNIQUE;",
             )
             session.run(
-                f"CREATE CONSTRAINT ON (u:{URL_LABEL}) ASSERT u.{NAME_PROPERTY} IS UNIQUE;"
+                f"CREATE CONSTRAINT ON (u:{URL_LABEL}) ASSERT u.{NAME_PROPERTY} IS UNIQUE;",
             )
             session.run(
-                f"CREATE CONSTRAINT ON (w:{WEBSITE_LABEL}) ASSERT w.{NAME_PROPERTY} IS UNIQUE;"
+                f"CREATE CONSTRAINT ON (w:{WEBSITE_LABEL}) ASSERT w.{NAME_PROPERTY} IS UNIQUE;",
             )
             session.run(
-                f"CREATE CONSTRAINT ON (e:{EMAIL_LABEL}) ASSERT e.{NAME_PROPERTY} IS UNIQUE;"
+                f"CREATE CONSTRAINT ON (e:{EMAIL_LABEL}) ASSERT e.{NAME_PROPERTY} IS UNIQUE;",
             )
             session.run(
-                f"CREATE CONSTRAINT ON (s:{SOURCE_LABEL}) ASSERT s.{NAME_PROPERTY} IS UNIQUE;"
+                f"CREATE CONSTRAINT ON (s:{SOURCE_LABEL}) ASSERT s.{NAME_PROPERTY} IS UNIQUE;",
             )
             # Create indexes
             session.run(f"CREATE INDEX ON :{CONCEPT_LABEL}({NAME_PROPERTY});")
@@ -149,7 +160,7 @@ class KnowledgeDatabase:
                     f"""
                     MERGE (c:{CONCEPT_LABEL}:{self.database} {{{NAME_PROPERTY}: $name}})
                     ON CREATE SET c.{TOPIC_PROPERTY} = $topic, c.{CREATED_AT_PROPERTY} = $created_at
-                    """,
+                    """,  # type: ignore  # noqa: PGH003
                     name=concept.name,
                     topic=concept.topic,
                     created_at=created_at_iso,
@@ -170,7 +181,7 @@ class KnowledgeDatabase:
                         MATCH (c:{CONCEPT_LABEL}:{self.database} {{{NAME_PROPERTY}: $concept_name}})
                         MERGE (u)-[:{DESCRIBES_RELATIONSHIP}]->(c)
                         MERGE (w)-[:{HOSTS_RELATIONSHIP}]->(u)
-                        """,
+                        """,  # type: ignore  # noqa: PGH003
                         url=url,
                         website=website,
                         concept_name=concept.name,
@@ -193,7 +204,7 @@ class KnowledgeDatabase:
                         MERGE (k)-[:{REPRESENTS_RELATIONSHIP}]->(c)
                         MERGE (e)-[:{CONTAINS_RELATIONSHIP}]->(k)
                         MERGE (s)-[:{SENDS_RELATIONSHIP}]->(e)
-                        """,
+                        """,  # type: ignore  # noqa: PGH003
                         keyword=keyword,
                         email_id=email_id,
                         source=source,
@@ -208,3 +219,39 @@ class KnowledgeDatabase:
         elif url.startswith("https://"):
             url = url[len("https://") :]
         return url.split("/")[0]
+
+    def get_all_concepts_basic_info(self) -> list[KnowledgeConceptBasicInfo]:
+        """Get the concept infos with their associated mail IDs.
+
+        Returns:
+            list[KnowledgeConceptBasicInfo]: A list of knowledge concept information including name, topic, creation date, and associated mail IDs.
+
+        """
+        with self.client.session(
+            default_access_mode="READ",
+            bookmark_manager=self.bookmark_manager,
+        ) as session:
+            result = session.run(
+                f"""
+                MATCH (c:{CONCEPT_LABEL}:{self.database})
+                OPTIONAL MATCH (e:{EMAIL_LABEL})-[:{CONTAINS_RELATIONSHIP}]->(k:{KEYWORD_LABEL})-[:{REPRESENTS_RELATIONSHIP}]->(c)
+                WITH c, collect(DISTINCT e.{NAME_PROPERTY}) AS mail_ids
+                RETURN c.{NAME_PROPERTY} AS name, 
+                       c.{TOPIC_PROPERTY} AS topic, 
+                       c.{CREATED_AT_PROPERTY} AS date_created, 
+                       mail_ids
+                ORDER BY c.{CREATED_AT_PROPERTY} DESC
+                """,  # type: ignore  # noqa: PGH003
+            )
+
+            return [
+                KnowledgeConceptBasicInfo(
+                    name=record["name"],
+                    topic=record["topic"],
+                    date_created=datetime.fromisoformat(record["date_created"]),
+                    mail_ids=[
+                        mail_id for mail_id in record["mail_ids"] if mail_id is not None
+                    ],
+                )
+                for record in result
+            ]
